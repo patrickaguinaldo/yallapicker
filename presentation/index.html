@@ -681,7 +681,7 @@ function lineCard(l, view){
   let extra='';
   if(l.cut && isTodo) extra = `<div class="cut"><span class="muted">Cutting</span> <b class="semi">${l.cut}</b></div>`;
   let subBlock='';
-  if(l.status==='oos' && subLines(l).length) subBlock = `<div class="subbox"><div class="subhead"><span>Substituted with</span><button class="editbtn" data-a="resub" data-id="${l.id}">${I.pencil}Edit</button></div>${subLines(l).map(x=>`<div class="subitem"><img src="${x.big||x.img}" alt=""><div class="si"><div class="sn">${x.name}</div><div class="skv"><div><span>Material</span><b>${x.mat==='000000'?'364608':x.mat}</b></div><div><span>Bin Location</span><b>${x.bin}</b></div></div></div>${x.status==='removed'?ring(x.removedQty||x.qty,x.origQty||x.qty,'#ff3b30'):ring(x.picked,x.qty,'#008522')}</div>`).join('')}</div>`;
+  if(l.status==='oos' && subLines(l).length) subBlock = `<div class="subbox"><div class="subhead"><span>Substituted with</span><button class="editbtn" data-a="resub" data-id="${l.id}">${I.pencil}Edit</button></div></div>`;
   else if(l.sub) subBlock = `<div class="subsel"><img src="${l.big||l.img}" alt=""><div style="flex:1;min-width:0"><div class="cap11 semi" style="color:#d77e00">Selected Subtitute</div><div style="font-size:13px;font-weight:600;margin:2px 0">${l.sub.name}</div><div style="font-size:10px" class="muted">Material <b style="color:#161616">[000000]</b> · Bin Location <b style="color:#161616">A819</b></div></div><button class="pencil" data-a="resub" data-id="${l.id}" aria-label="Change substitute">${I.pencil}</button></div>`;
   const showBcs = !l.sub;
   return `<div class="pc${hl('line-'+l.id)}${S.flashId===l.id?' flash':''}" data-a="line" data-id="${l.id}" id="card-${l.id}">
