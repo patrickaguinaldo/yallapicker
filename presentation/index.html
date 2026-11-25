@@ -841,7 +841,9 @@ function toast(text, kind='ok', ms=1800){ S.toast={text,kind}; clearTimeout(toas
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
 const SCAN_DELAY=1500; // logo loader shown while a scan is validated
 function pressKeys(){ document.querySelectorAll('.key.scan').forEach(k=>{ k.classList.remove('press'); void k.offsetWidth; k.classList.add('press'); setTimeout(()=>k.classList.remove('press'),450); }); }
-async function scanSim(){ pressKeys(); S.scanning=true; S.busy=true; render(); await wait(SCAN_DELAY); S.scanning=false; S.busy=false; render(); }
+async function scanSim(){ pressKeys(); S.scanning=true; S.scanT=Date.now(); S.busy=true; try{ render(); await wait(SCAN_DELAY); } finally { S.scanning=false; S.busy=false; try{ render(); }catch(e){} } }
+// safety net: the scan loader can never stay up longer than a few seconds
+setInterval(()=>{ if(S && S.scanning && Date.now()-(S.scanT||0)>4000){ S.scanning=false; S.busy=false; render(); } },1000);
 
 async function act(a, el){
   if(S.busy) return;

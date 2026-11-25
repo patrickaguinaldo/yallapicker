@@ -564,7 +564,7 @@ function stateFor(n){
   if(n>=12){ ['sensodyne','pringles','milk'].forEach(id=>{const l=L(id);l.picked=l.qty;l.status='picked'}); s.screen='orders'; s.elapsed=12*60000+2000; s.sheet={type:'ready'}; }
   switch(n){
     case 1: s.hl='sso'; break;
-    case 2: s.screen='orders'; s.hl='order1'; break;
+    case 2: s.screen='orders'; s.hl='swipe1'; break;
     case 3: s.screen='orders'; s.hl='swipe1'; break;
     case 4: s.hl='camsw'; break;
     case 5: s.hl='camsw'; break;
@@ -952,7 +952,9 @@ let toastT;
 function toast(text, kind='ok', ms=1800){ S.toast={text,kind}; clearTimeout(toastT); toastT=setTimeout(()=>{S.toast=null; render();}, ms); }
 function wait(ms){ return new Promise(r=>setTimeout(r,ms)); }
 const SCAN_DELAY=1500; // logo loader shown while a scan is validated
-async function scanSim(){ S.scanning=true; S.busy=true; render(); await wait(SCAN_DELAY); S.scanning=false; S.busy=false; render(); }
+async function scanSim(){ S.scanning=true; S.scanT=Date.now(); S.busy=true; try{ render(); await wait(SCAN_DELAY); } finally { S.scanning=false; S.busy=false; try{ render(); }catch(e){} } }
+// safety net: the scan loader can never stay up longer than a few seconds
+setInterval(()=>{ if(S && S.scanning && Date.now()-(S.scanT||0)>4000){ S.scanning=false; S.busy=false; render(); } },1000);
 
 async function act(a, el){
   if(S.busy) return;
@@ -961,7 +963,7 @@ async function act(a, el){
   switch(a){
     case 'sso':
       if(S.loading) return; S.loading=true; render(); await wait(900); S.loading=false;
-      S.screen='orders'; setStep(2); S.hl='order1'; S.keepScroll=false; render(); break;
+      S.screen='orders'; setStep(2); S.hl='swipe1'; S.keepScroll=false; render(); break;
     case 'support': toast('Not part of demo','info'); render(); break;
     case 'order1': case 'order2': case 'order3': {
       S.detail={i:+el.dataset.oi, ready:false}; S.screen='detail'; if(S.step===2){ setStep(3); S.hl='swipe1'; } tick(); S.keepScroll=false; render(); break; }
