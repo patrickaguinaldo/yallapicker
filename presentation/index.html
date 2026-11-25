@@ -478,18 +478,44 @@ const L = id => S.lines.find(l=>l.id===id);
 // remove q units of a line; whatever is left stays visible as its own line
 let subSeq=0;
 // how many units can still be substituted: what's left to pick, or the whole line when re-picking a substitute
-function subRoom(l){ return l.status==='todo' ? Math.max(1,l.qty-l.picked) : l.qty; }
+function subRoom(l){ if(l.status==='todo') return Math.max(1,l.qty-l.picked);
+  const base=l.parent?L(l.parent):null; return l.qty + (base && (base.status==='todo'||base.status==='picked') ? Math.max(0,base.qty-base.picked) : 0); }
 function applySubs(l0,q0){ const tot0=Object.values(q0).reduce((a,b)=>a+b,0); if(tot0<1) return 0;
       let oosL=l0;
-      subLines(l0).forEach(x=>S.lines.splice(S.lines.indexOf(x),1)); // re-selecting replaces the old substitutes
+      subLines(l0).filter(x=>x.status!=='removed').forEach(x=>S.lines.splice(S.lines.indexOf(x),1)); // re-selecting replaces the old substitutes
       if(l0.status==='todo' && tot0<l0.qty){ const orig=l0.origQty||l0.qty; oosL={...l0, id:l0.id+'-oos'+(++subSeq), parent:l0.id, qty:tot0, origQty:orig, status:'oos', picked:0, sub:null};
         l0.origQty=orig; l0.qty-=tot0; l0.picked=Math.min(l0.picked,l0.qty); l0.status=l0.picked>=l0.qty?'picked':'todo'; S.lines.splice(S.lines.indexOf(l0)+1,0,oosL); }
       else if(l0.status==='todo'){ l0.status='oos'; l0.picked=0; l0.sub=null; }
+      else if(l0.status==='oos'){ // editing: take more units off the pick list, or give some back
+        const d=tot0-l0.qty;
+        if(d>0) takeFromPick(l0.id,d);
+        else if(d<0){ returnToPick(l0,-d); if(l0.status!=='oos') oosL=S.lines.find(x=>x.parent===l0.id&&x.status==='oos')||l0; }
+      }
       const nm=oosL.name.replace('<br>',' '); let at=S.lines.indexOf(l0.status==='todo'?l0:oosL)+1;
       SUBS.forEach(sb=>{ const n=q0[sb.id]||0; if(!n) return;
         const x={id:oosL.id+'-s'+sb.id+(++subSeq), name:sb.name, qty:n, picked:0, status:'todo', isSub:true, subFor:oosL.id, forName:nm, cat:oosL.cat, img:oosL.big||oosL.img, big:oosL.big, unit:oosL.unit, mat:'364608', bin:oosL.bin||'A819', bcs:[sb.bc], cut:null, flag:null};
         S.lines.splice(at++,0,x); });
   return tot0; }
+// removing a substitute puts that many units of the original item back on the pick list
+function returnToPick(o,q){
+  if(!o || o.status!=='oos') return; q=Math.min(q,o.qty); if(q<=0) return;
+  if(o.parent){ const base=L(o.parent);
+    if(base){ base.qty+=q; if(base.status==='merged'||base.status==='picked') base.status = base.picked>=base.qty?'picked':'todo'; }
+    o.qty-=q; if(o.qty<=0) S.lines.splice(S.lines.indexOf(o),1);
+  } else if(q>=o.qty){ o.status='todo'; o.picked=0; }
+  else { o.origQty=o.origQty||o.qty; const c={...o, id:o.id+'-oos'+(++subSeq), parent:o.id, qty:o.qty-q, status:'oos', picked:0};
+    S.lines.forEach(x=>{ if(x.subFor===o.id) x.subFor=c.id; }); o.qty=q; o.status='todo'; o.picked=0; S.lines.splice(S.lines.indexOf(o)+1,0,c); }
+}
+// undoing that removal marks the units out of stock again
+function takeFromPick(oid,q){
+  const o=L(oid); if(!o) return;
+  if(o.status==='oos'){ const base=o.parent?L(o.parent):null; if(base && base.status!=='oos' && base.qty-base.picked>=q){ base.qty-=q; if(base.qty===0) base.status='merged'; o.qty+=q; } }
+  else if(o.status==='todo' && o.qty-o.picked>=q){
+    if(q>=o.qty){ o.status='oos'; o.picked=0; }
+    else { o.origQty=o.origQty||o.qty; const c={...o, id:o.id+'-oos'+(++subSeq), parent:o.id, qty:q, status:'oos', picked:0, sub:null};
+      S.lines.forEach(x=>{ if(x.subFor===o.id) x.subFor=c.id; }); o.qty-=q; S.lines.splice(S.lines.indexOf(o)+1,0,c); }
+  }
+}
 function subLines(l){ return S.lines.filter(x=>x.subFor===l.id); }
 function splitRemove(l,q){
   const orig=l.origQty||l.qty;
@@ -681,7 +707,7 @@ function lineCard(l, view){
   let extra='';
   if(l.cut && isTodo) extra = `<div class="cut"><span class="muted">Cutting</span> <b class="semi">${l.cut}</b></div>`;
   let subBlock='';
-  if(l.status==='oos' && subLines(l).length) subBlock = `<div class="subbox"><div class="subhead"><span>Substituted with</span><button class="editbtn" data-a="resub" data-id="${l.id}">${I.pencil}Edit</button></div></div>`;
+  if(l.status==='oos' && subLines(l).length) subBlock = `<div class="subbox"><div class="subhead"><span>Substituted with</span><button class="editbtn" data-a="resub" data-id="${l.id}">${I.pencil}Edit</button></div>${subLines(l).filter(x=>x.status!=='removed'&&x.status!=='merged').map(x=>`<div class="subitem"><img src="${x.big||x.img}" alt=""><div class="si"><div class="sn">${x.name}</div><div class="skv"><div><span>Material</span><b>${x.mat}</b></div><div><span>Bin Location</span><b>${x.bin}</b></div></div></div>${ring(x.picked,x.qty,'#008522')}</div>`).join('')}</div>`;
   else if(l.sub) subBlock = `<div class="subsel"><img src="${l.big||l.img}" alt=""><div style="flex:1;min-width:0"><div class="cap11 semi" style="color:#d77e00">Selected Subtitute</div><div style="font-size:13px;font-weight:600;margin:2px 0">${l.sub.name}</div><div style="font-size:10px" class="muted">Material <b style="color:#161616">[000000]</b> · Bin Location <b style="color:#161616">A819</b></div></div><button class="pencil" data-a="resub" data-id="${l.id}" aria-label="Change substitute">${I.pencil}</button></div>`;
   const showBcs = !l.sub;
   return `<div class="pc${hl('line-'+l.id)}${S.flashId===l.id?' flash':''}" data-a="line" data-id="${l.id}" id="card-${l.id}">
@@ -755,7 +781,7 @@ function renderSheet(){
   else if(sh.type==='subs'){
     const l=L(sh.id), tot=Object.values(sh.q).reduce((a,b)=>a+b,0), room=subRoom(l);
     h = `<div class="shead"><p>Select substitute</p><button data-a="close-sheet" aria-label="Close">${I.close}</button></div>
-      <div style="width:100%;display:flex;gap:10px;align-items:center"><div class="pimg">${thumb(l)}</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600;line-height:17px;margin-bottom:6px">${l.name}</div>${bcs({bcs:[l.bcs[0]]})}</div>${ring(tot,l.qty)}</div>
+      <div style="width:100%;display:flex;gap:10px;align-items:center"><div class="pimg">${thumb(l)}</div><div style="flex:1;min-width:0"><div style="font-size:15px;font-weight:600;line-height:17px;margin-bottom:6px">${l.name}</div>${bcs({bcs:[l.bcs[0]]})}</div>${ring(tot,room)}</div>
       <div style="width:100%" class="cap11 muted">Selected Substitute</div>
       <div class="subscroll">${SUBS.map(s=>{const q=sh.q[s.id]||0;return `<div class="subcard${q?' sel':''}">
         <div class="simg"><img src="${l.big||l.img}" alt="">
@@ -896,6 +922,7 @@ async function act(a, el){
     case 'cr-back': S.sheet=null; render(); break;
     case 'cr-yes': {
       const l=L(S.sheet.id), q=S.sheet.q; const kept=splitRemove(l,q); S.sheet=null; S.cam=false;
+      if(l.isSub) returnToPick(L(l.subFor), q);
       S.tab='todo';
       if(kept){ S.flashId=l.id; setTimeout(()=>{S.flashId=null},900); toast(`${q} removed · ${kept} kept${l.status==='picked'?' as picked':' to pick'}`); }
       else toast('Item successfully removed');
@@ -903,6 +930,7 @@ async function act(a, el){
       if(S.step===8){ setStep(9); S.hl = S.tab==='todo' ? 'cancel-onion' : 'tab-todo'; }
       S.keepScroll=false; render(); break; }
     case 'undo': { const l=L(id);
+      if(l.isSub) takeFromPick(l.subFor, l.removedQty||l.qty);
       if(l.parent){ const p=L(l.parent); p.qty+=l.removedQty; p.status = p.picked>=p.qty?'picked':'todo'; S.lines.splice(S.lines.indexOf(l),1); }
       else { l.status='todo'; l.picked=0; l.qty=l.origQty||l.qty; l.removedQty=0; }
       tick(); toast('Removal undone'); render(); break; }
