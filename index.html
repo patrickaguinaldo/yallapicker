@@ -523,7 +523,7 @@ body.solo .login .note{top:auto;bottom:16px}
 <div id="viewport">
   <div id="stage">
     <div id="intro">
-      <h1>Picking an order, from sign-in to Ready for Shipment</h1>
+      <h1>Picking an order end to end, then running the branch</h1>
       <p>Click the highlighted button on the phone, or the steps on the left.<br>
       <span class="y">Turn your sound on:</span> each scan plays the beep and buzz the device would give.
       <button id="soundBtn" type="button">🔊 Sound on</button></p>
@@ -617,6 +617,12 @@ const STEPS = [
  {t:'Pick and scan a substitute', d:'The picker chooses a substitute and it joins the To Pick list, picked like any other item. The original line stays in Out of Stock with the substitute listed under it. If the flag were false, the line would only be removed.'},
  {sec:'Finish the order', t:'Pick the remaining lines', d:'The other 4 lines follow the same scan and confirm steps. The demo fills them in one tap.'},
  {t:'Order is Ready for Shipment', d:'Status goes to SAP Commerce Cloud for downstream fulfilment. The picker is free to claim the next order.'},
+  {sec:'Master Picker: run the branch', t:'Sign in as Master Picker', d:'Same SSO sign-in. The Master Picker role opens the branch view: an overview, every order in the branch and each picker’s activity.'},
+  {t:'See the branch at a glance', d:'Orders and items for the period, an orders chart, the split of picked, substituted and removed items, and six KPIs against the previous period. Switch the period to compare.'},
+  {t:'Reassign an idle order', d:'Needs Attention lists in-picking orders that have gone idle. The Master Picker chooses a free picker and a reason; the order moves over with its progress kept.'},
+  {t:'Assign a pending order', d:'From Orders › Pending, a new order can go straight to a picker instead of waiting to be claimed. Pickers already holding an order are listed last and can’t be chosen.'},
+  {t:'Follow the audit trail', d:'Every order keeps a timeline: created, claimed, assigned or reassigned (by whom and why), and each status change.'},
+  {t:'Compare picker performance', d:'Picker Ranking sorts the team by any KPI. Tap a picker to open their profile with each metric against the branch.'},
 ];
 const ORDER_NO = '00840928402';
 const ORDER_LINES = [null,
@@ -668,6 +674,14 @@ function splitRemove(l,q){
 
 function stateFor(n){
   const s = fresh(); S = s; s.step = n;
+  if(n>=13){ // Master Picker chapter
+    if(n===13){ s.sheet={type:'role'}; s.hl='role-master'; return s; }
+    s.role='Master Picker'; s.mp=mpInit(); s.screen='mpOverview'; const m=s.mp;
+    if(n>=15) m.periodTried=true;
+    if(n>=16) mpDoReassign('ip1','C','Picker inactive');
+    if(n>=17){ const e=mpDoAssign('p0','D'); m.guideId=e.id; s.screen='mpOrders'; m.tab='inpick'; }
+    if(n>=18){ m.sawAudit=true; s.screen='mpOverview'; }
+    return s; }
   if(n>=4){ s.screen='picking'; s.t0 = Date.now() - (n-3)*47000; }
   if(n>=6){ const b=L('beef'); b.picked=1; b.status='picked'; }
   if(n>=7){ const c=L('capsicum'); c.picked=c.qty; c.status='picked'; }
@@ -1252,9 +1266,41 @@ function mpSheet(sh){
 }
 function mpNow(){ const d=new Date(); return d.getHours()+':'+String(d.getMinutes()).padStart(2,'0'); }
 function mpStart(entryId, oi){
-  S.mpActive=entryId; S.cur=oi; S.screen='picking'; S.t0=Date.now(); S.tab='todo'; S.cam=false; S.expanded=null; S.sheet=null; S.hl=null; S.step=12; S.finished=false;
+  S.mpActive=entryId; S.cur=oi; S.screen='picking'; S.t0=Date.now(); S.tab='todo'; S.cam=false; S.expanded=null; S.sheet=null; S.hl=null; if(S.step<12) S.step=12; S.finished=false;
   S.lines=(oi===0?LINES0:ORDER_LINES[oi]).map(l=>({...l, picked:0, status:'todo', sub:null}));
   S.keepScroll=false; render();
+}
+function mpDoAssign(pid, k){ const m=S.mp; const p=m.pending.find(x=>x.id===pid); if(!p) return null; m.pending=m.pending.filter(x=>x!==p);
+  const e={id:'ip'+(++m.seq), oi:p.oi, od:p.od, picker:k, claimed:mpNow(), picked:0, total:unitsOf(p.oi)};
+  e.log=mpLog(p,'pending').concat([{t:mpNow(),h:'Assigned · Created → In Picking',s:`by <b>[Master Picker]</b> · to <b>${MP_PICKERS[k].n.replace(' (You)','')}</b>`}]);
+  m.inpick.unshift(e); return e; }
+function mpDoReassign(id, k, reason){ const e=S.mp.inpick.find(x=>x.id===id); if(!e) return null;
+  mpLog(e,'inpick').push({t:mpNow(),h:`Reassigned · released from ${MP_PICKERS[e.picker].n.replace(' (You)','')}`,s:`by <b>[Master Picker]</b> · <span class="muted">reason:</span> <b>${reason}</b>`});
+  e.picker=k; e.claimed=mpNow(); e.idle=0; return e; }
+// presentation: move through the Master Picker steps and point at the next thing to tap
+function mpGuide(){
+  const m=S.mp, sh=S.sheet; if(!m) return;
+  if(S.step===14 && m.periodTried && !m.dd) S.step=15;
+  if(S.step===15 && (m.inpick.find(e=>e.id==='ip1')||{}).picker!=='A' && !sh) S.step=16;
+  if(S.step===16 && !m.pending.find(x=>x.id==='p0') && !sh){ S.step=17; m.guideId=(m.inpick[0]||{}).id; }
+  if(S.step===17 && S.screen==='mpAudit') m.sawAudit=true;
+  if(S.step===17 && m.sawAudit && S.screen!=='mpAudit') S.step=18;
+  if(S.step===18 && S.screen==='mpPicker'){ S.finished=true; S.hl=null; return; }
+  let h=null;
+  switch(S.step){
+    case 14: h = m.dd ? '[data-a=mp-period][data-p="7 days"]' : '[data-a=mp-today]'; break;
+    case 15: h = !sh ? (S.screen==='mpOverview' ? '[data-a=mp-reassign][data-id=ip1]' : '[data-a=nav-overview]')
+      : sh.type==='mpReassign' ? (!sh.sel ? '[data-a=mp-reassign-pick]' : !sh.reason ? '[data-a=mp-reason-open]' : '[data-a=mp-confirm-reassign]')
+      : sh.type==='mpAssign' ? (sh.sel ? '[data-a=mp-confirm-assign]' : '[data-a=mp-pick][data-k=C]')
+      : sh.type==='mpReason' ? '[data-a=mp-reason][data-r="Picker inactive"]' : null; break;
+    case 16: h = !sh ? (S.screen!=='mpOrders' ? '[data-a=nav-orders]' : m.tab!=='pending' ? '[data-a=mp-tab][data-t=pending]' : '[data-a=mp-assign][data-id=p0]')
+      : sh.type==='mpAssign' ? (sh.sel ? '[data-a=mp-confirm-assign]' : '[data-a=mp-pick][data-k=D]') : null; break;
+    case 17: h = sh ? null : S.screen==='mpOrders' ? (m.tab!=='inpick' ? '[data-a=mp-tab][data-t=inpick]' : '#mp-'+m.guideId)
+      : S.screen==='detail' ? '[data-a=mp-audit]' : S.screen==='mpAudit' ? '[data-a=mp-audit-back]' : '[data-a=nav-orders]'; break;
+    case 18: h = sh ? null : S.screen==='mpOverview' ? (m.rm!==1 ? '[data-a=mp-rm][data-i="1"]' : '.rk') : S.screen==='detail' ? '[data-a=detail-back]'
+      : S.screen==='mpAudit' ? '[data-a=mp-audit-back]' : '[data-a=nav-overview]'; break;
+  }
+  S.hl = h ? '@'+h : null;
 }
 async function mpAct(a, el){
   const m=S.mp, id=el&&el.dataset?el.dataset.id:null;
@@ -1264,7 +1310,7 @@ async function mpAct(a, el){
     case 'mp-mine': m.mine=!m.mine; tick(); render(); return true;
     case 'mp-today': m.dd=!m.dd; tick(); render(); return true;
     case 'mp-dd-close': m.dd=false; render(); return true;
-    case 'mp-period': m.period=el.dataset.p; m.dd=false; tick(); S.keepScroll=false; render(); return true;
+    case 'mp-period': m.period=el.dataset.p; m.periodTried=true; m.dd=false; tick(); S.keepScroll=false; render(); return true;
     case 'mp-rm': { const sl=el.parentNode.scrollLeft, bd=document.querySelector('.app .body'), st=bd?bd.scrollTop:0; m.rm=+el.dataset.i; render(); const rc=document.querySelector('.rchips'), b2=document.querySelector('.app .body'); if(b2) b2.scrollTop=st; if(rc) rc.scrollLeft=sl; return true; }
     case 'mp-rank': m.pk=el.dataset.k; S.screen='mpPicker'; tick(); S.keepScroll=false; render(); return true;
     case 'mp-detail': { const [k,e]=mpFind(id); if(!e) return true; S.detail={i:e.oi, mp:id, from:S.screen}; S.screen='detail'; tick(); S.keepScroll=false; render(); return true; }
@@ -1277,10 +1323,7 @@ async function mpAct(a, el){
     case 'mp-pick': if(el.disabled) return true; S.sheet.sel=el.dataset.k; tick(); render(); return true;
     case 'mp-confirm-assign': { const sh=S.sheet; if(!sh.sel) return true;
       if(sh.back){ S.sheet={...sh.back, sel:sh.sel}; tick(); render(); return true; }
-      const p=m.pending.find(x=>x.id===sh.id); m.pending=m.pending.filter(x=>x!==p);
-      const e={id:'ip'+(++m.seq), oi:p.oi, od:p.od, picker:sh.sel, claimed:mpNow(), picked:0, total:unitsOf(p.oi)};
-      e.log=mpLog(p,'pending').concat([{t:mpNow(),h:'Assigned · Created → In Picking',s:`by <b>[Master Picker]</b> · to <b>${MP_PICKERS[sh.sel].n.replace(' (You)','')}</b>`}]);
-      m.inpick.unshift(e); S.sheet=null; m.tab='inpick'; if(S.screen==='detail' && S.detail) S.detail.mp=e.id; beepOK(); toast('Order successfully assigned'); S.keepScroll=false; render(); return true; }
+      const e=mpDoAssign(sh.id, sh.sel); S.sheet=null; m.tab='inpick'; if(S.screen==='detail' && S.detail) S.detail.mp=e.id; beepOK(); toast('Order successfully assigned'); S.keepScroll=false; render(); return true; }
     case 'mp-reassign': S.sheet={type:'mpReassign', id, sel:null, reason:''}; if(S.screen!=='mpOrders'){} tick(); render(); return true;
     case 'mp-reassign-pick': { const sh=S.sheet; const e=m.inpick.find(x=>x.id===sh.id); S.sheet={type:'mpAssign', from:e.id, sel:sh.sel, back:sh}; tick(); render(); return true; }
     case 'mp-reason-open': S.sheet={type:'mpReason', back:S.sheet}; tick(); render(); return true;
@@ -1288,8 +1331,7 @@ async function mpAct(a, el){
     case 'mp-reason-back': S.sheet=S.sheet.back; tick(); render(); return true;
     case 'mp-assign-back': S.sheet=S.sheet.back; tick(); render(); return true;
     case 'mp-confirm-reassign': { const sh=S.sheet; if(!sh.sel||!sh.reason) return true; const e=m.inpick.find(x=>x.id===sh.id);
-      mpLog(e,'inpick').push({t:mpNow(),h:`Reassigned · released from ${MP_PICKERS[e.picker].n.replace(' (You)','')}`,s:`by <b>[Master Picker]</b> · <span class="muted">reason:</span> <b>${sh.reason}</b>`});
-      e.picker=sh.sel; e.claimed=mpNow(); e.idle=0; S.sheet=null; beepOK(); toast('Order successfully reassigned');
+      mpDoReassign(e.id, sh.sel, sh.reason); S.sheet=null; beepOK(); toast('Order successfully reassigned');
       if(S.screen==='mpOrders') m.tab='inpick'; render(); return true; }
     case 'mp-continue': { const e=m.inpick.find(x=>x.id===id); mpStart(e.id, e.oi); return true; }
   }
@@ -1305,6 +1347,7 @@ function mpFinishDone(){
 }
 
 function render(){
+  if(S.mp && S.step>=14 && !S.finished) mpGuide();
   let html = S.screen==='login'?renderLogin(): S.screen==='mpAudit'?renderMpAudit(): S.screen==='mpPicker'?renderMpPicker(): S.screen==='mpOverview'?renderMpOverview(): S.screen==='mpOrders'?renderMpOrders(): S.screen==='orders'?renderOrders(): S.screen==='detail'?renderDetail(): S.screen==='profile'?renderProfile():renderPicking();
   html += renderSheet();
   if(S.scanning) html += `<div class="scanov"><img src="data:image/png;base64,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" alt="Scanning"></div>`;
@@ -1321,10 +1364,11 @@ function render(){
   // yellow keys glow when a scan is expected
   const scanReady = ['viewfinder'].includes(S.hl) || (S.hl==='sd-plus' && S.sheet && S.sheet.q===0);
   document.querySelectorAll('.key.scan').forEach(k=>k.classList.toggle('ready', scanReady));
+  if(HINTS && S.hl && S.hl[0]==='@'){ const g=screenEl.querySelector(S.hl.slice(1)); if(g) g.classList.add('hl'); }
   // bring highlighted element into view
-  requestAnimationFrame(()=>{ const h=screenEl.querySelector('.hl'); const b=document.getElementById('pbody');
+  requestAnimationFrame(()=>{ const h=screenEl.querySelector('.hl'); const b=document.getElementById('pbody')||(h&&h.closest('.body'));
     if(h && b && b.contains(h)){ const hr=h.getBoundingClientRect(), br=b.getBoundingClientRect(); const sc=parseFloat(getComputedStyle(document.getElementById('stage')).getPropertyValue('--s'))||1;
-      if(hr.top<br.top+8 || hr.bottom>br.bottom-70){ b.scrollBy({top:(hr.top-br.top)/sc-12, behavior:'smooth'}); } } });
+      if(hr.top<br.top+8 || hr.bottom>br.bottom-70){ const ctr=b.id!=='pbody'; b.scrollBy({top:ctr?((hr.top+hr.bottom)/2-(br.top+br.bottom)/2)/sc:(hr.top-br.top)/sc-12, behavior:'smooth'}); } } });
 }
 
 /* steps panel */
@@ -1333,21 +1377,21 @@ function renderSteps(){
   let h='';
   STEPS.forEach((s,i)=>{ const n=i+1;
     if(s.sec) h+=`<div class="sec">${s.sec}</div>`;
-    const cls = S.finished? 'done' : n===S.step?'active': n<S.step?'done':'';
+    const cls = S.finished? (n<=S.step?'done':'') : n===S.step?'active': n<S.step?'done':'';
     h+=`<button class="step ${cls}" data-step="${n}"><span class="num">${n}</span><span style="flex:1"><div class="t">${s.t}</div><div class="d">${s.d}</div></span></button>`;
   });
-  h+=`<div id="stepFoot">${S.finished?'<span style="color:#9bd49c;font-weight:600;font-size:14px;margin-right:auto;align-self:center">✓ Order picked end to end</span>':''}<button data-nav="prev">← Previous</button><button data-nav="next">Next →</button><button data-nav="restart">Restart</button></div>`;
+  h+=`<div id="stepFoot">${S.finished?`<span style="color:#9bd49c;font-weight:600;font-size:14px;margin-right:auto;align-self:center">${S.step<=12?'✓ Order picked end to end':'✓ Picker and Master Picker flows covered'}</span>`:''}<button data-nav="prev">← Previous</button><button data-nav="next">Next →</button><button data-nav="restart">Restart</button></div>`;
   stepsEl.innerHTML=h;
   const a=stepsEl.querySelector('.step.active');
   if(a && !S._noScroll && renderSteps.last!==S.step){ const r=a.offsetTop - stepsEl.clientHeight/2 + a.offsetHeight/2; stepsEl.scrollTo({top:r,behavior:'smooth'}); }
   renderSteps.last=S.step;
   const s=STEPS[S.step-1];
-  mcap.innerHTML = `<div class="row"><span class="num">${S.finished?'✓':S.step}</span><div><div class="t">${S.finished?'Done: order picked end to end':s.t}</div><div class="d">${S.finished?'Restart to run the flow again, or jump to any step.':s.d}</div></div></div>
+  mcap.innerHTML = `<div class="row"><span class="num">${S.finished?'✓':S.step}</span><div><div class="t">${S.finished?(S.step<STEPS.length?'Order picked end to end':'Done: picking and branch management covered'):s.t}</div><div class="d">${S.finished?(S.step<STEPS.length?'Next: the same branch seen by a Master Picker. Press Next →':'Restart to run the flows again, or jump to any step.'):s.d}</div></div></div>
     <div class="nav"><button data-nav="prev">← Back</button><button data-nav="next">Next →</button><button data-nav="restart">↺</button></div>`;
 }
 
 function setStep(n){ S.step=n; }
-function go(n){ n=Math.max(1,Math.min(12,n)); stateFor(n); S.keepScroll=false; render(); }
+function go(n){ n=Math.max(1,Math.min(STEPS.length,n)); stateFor(n); S.keepScroll=false; render(); }
 
 /* ======================= flows ======================= */
 let toastT;
@@ -1379,7 +1423,7 @@ async function act(a, el){
     case 'role': {
       if(S.loading) return; S.role=el.dataset.role; S.sheet=null; S.hl=null; tick();
       S.loading=true; render(); await wait(900); S.loading=false;
-      if(S.role==='Master Picker'){ S.mp=mpInit(); S.screen='mpOverview'; S.hl=null; S.keepScroll=false; render(); break; }
+      if(S.role==='Master Picker'){ S.mp=mpInit(); S.screen='mpOverview'; S.hl=null; if(!document.body.classList.contains('solo')){ S.step=14; S.finished=false; } S.keepScroll=false; render(); break; }
       S.screen='orders'; setStep(2); S.hl='swipe1'; S.keepScroll=false; render(); break; }
     case 'support': S.sheet={type:'support'}; tick(); render(); break;
     case 'support-email': case 'support-call': S.sheet=null; toast('Not part of demo','info'); render(); break;
@@ -1507,7 +1551,7 @@ const BARCODES_URL='https://patrickaguinaldo.github.io/yallapicker/barcodes.html
 /* ===== real camera scanning: BarcodeDetector where available, ZXing otherwise ===== */
 const CAM={on:false,starting:false,fail:false,video:null,stream:null,det:null,zx:null,cv:null,timer:0,last:'',lastT:0};
 async function camStart(){
-  if(CAM.on||CAM.starting) return;
+  if(CAM.on||CAM.starting||!document.body.classList.contains('solo')) return; // presentation: simulated scans only
   if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ camFail('Camera needs a secure (https) page'); return; }
   CAM.starting=true; CAM.fail=false; render();
   let stream;
@@ -1772,8 +1816,8 @@ function onNav(e){
   const st=e.target.closest('[data-step]'); if(st){ S._noScroll=true; go(+st.dataset.step); S._noScroll=false; return; }
   const nv=e.target.closest('[data-nav]'); if(!nv) return;
   if(nv.dataset.nav==='restart') go(1);
-  else if(nv.dataset.nav==='prev') go(S.finished?12:S.step-1);
-  else go(S.finished?12:S.step+1);
+  else if(nv.dataset.nav==='prev') go(S.finished?S.step:S.step-1);
+  else go(S.step+1);
 }
 stepsEl.addEventListener('click',onNav); mcap.addEventListener('click',onNav);
 document.addEventListener('keydown',e=>{ if(e.key==='ArrowRight') go(S.step+1); if(e.key==='ArrowLeft') go(S.step-1); });
@@ -1785,6 +1829,9 @@ setInterval(()=>{ const t=document.getElementById('timer'); if(t && S.t0){ const
 
 /* scale to fit */
 function fit(){
+  if(!document.body.classList.contains('solo')){ // presentation: scale the whole stage
+    const st=document.getElementById('stage'); const w=st.offsetWidth, h=st.offsetHeight;
+    const s=Math.min(innerWidth/w, innerHeight/h)*0.98; st.style.transform=`scale(${s})`; st.style.setProperty('--s',s); return; }
   const vw=window.visualViewport?visualViewport.width:innerWidth, vh=innerHeight;
   let s = vw/360;
   if(vh/s < 560) s = vh/560;          // very short / landscape: fit height
